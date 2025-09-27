@@ -64,7 +64,7 @@ local NOTIFY_RARITIES = {
     ["Secret"] = false,
 }
 
-local WEBHOOK_URL = "https://discord.com/api/webhooks/1421051351026110494/0IaDOy..." -- (keep or change)
+local WEBHOOK_URL = "https://discordapp.com/api/webhooks/1421339259364704317/Es50sPpGWfpmU4KtU-XHmdUUe6DBA3ZetEF1eckiWg9_njeInmont5_ZYo8xOIK4sGwi" -- (keep or change)
 local PURCHASE_DELAY = 0.5
 
 -- ===== STATE =====
