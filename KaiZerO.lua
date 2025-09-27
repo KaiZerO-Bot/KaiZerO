@@ -1,706 +1,724 @@
--- PvB Hub (Combined) — LocalScript
--- รวม AutoBuy (จาก autobuy_plant.lua) + GUI Hub (tabs, cards, toggles)
--- Place as a LocalScript under StarterPlayerScripts or run via executor's local environment.
+-- Combined Auto Controller (Merged LOGIC + UXUI + Bridge)
+-- Place this single file in a LocalScript environment (PlayerGui / StarterPlayerScripts) as needed.
 
--- ===== SERVICES & DEPENDENCIES =====
+-- SERVICES
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
 local HttpService = game:GetService("HttpService")
+
 local LocalPlayer = Players.LocalPlayer
+local playerGui = LocalPlayer:WaitForChild("PlayerGui")
+local backpack = LocalPlayer:WaitForChild("Backpack")
+local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
 
--- Try to require original modules used in autobuy script (if present)
-local Modules = ReplicatedStorage:FindFirstChild("Modules")
-local Utility
-local BridgeNet2, Util, Notification
-if Modules then
-    Utility = Modules:FindFirstChild("Utility")
-    if Utility then
-        BridgeNet2 = (pcall(function() return require(Utility:FindFirstChild("BridgeNet2")) end) and require(Utility:FindFirstChild("BridgeNet2"))) or nil
-        Util = (pcall(function() return require(Utility:FindFirstChild("Util")) end) and require(Utility:FindFirstChild("Util"))) or nil
-        Notification = (pcall(function() return require(Utility:FindFirstChild("Notification")) end) and require(Utility:FindFirstChild("Notification"))) or nil
-    end
-end
+-- MODULES (safe require as in original)
+local Modules = ReplicatedStorage:WaitForChild("Modules")
+local Utility = Modules:WaitForChild("Utility")
+local BridgeNet2 = require(Utility:WaitForChild("BridgeNet2"))
+local Util = (pcall(function() return require(Utility:WaitForChild("Util")) end) and require(Utility:WaitForChild("Util")) ) or nil
+local Notification = (pcall(function() return require(Utility:WaitForChild("Notification")) end) and require(Utility:WaitForChild("Notification")) ) or nil
 
-local PlayerDataMod = ReplicatedStorage:FindFirstChild("PlayerData")
-local PlayerData = nil
-local Data = {}
-if PlayerDataMod then
-    local ok, res = pcall(function() return require(PlayerDataMod):GetData() end)
-    if ok and res then
-        PlayerData = res
-        Data = PlayerData.Data or {}
-    end
-end
+local PlayerDataModule = (pcall(function() return require(ReplicatedStorage:WaitForChild("PlayerData")) end) and require(ReplicatedStorage:WaitForChild("PlayerData")) ) or nil
+local PlayerData = PlayerDataModule and PlayerDataModule:GetData()
+local Data = PlayerData and PlayerData.Data
 
--- Assets (Seeds & Plants)
-local SeedAssets = ReplicatedStorage:FindFirstChild("Assets") and ReplicatedStorage.Assets:FindFirstChild("Seeds")
-local PlantsAssets = ReplicatedStorage:FindFirstChild("Assets") and ReplicatedStorage.Assets:FindFirstChild("Plants")
+-- ASSETS / BRIDGES
+local PlantsAssets = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("Plants")
+local SeedAssets = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("Seeds")
+local GearAssets = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("Gears")
 
--- BridgeNet2 references (if available)
-local BuyItem, UpdStock, UpdatePlantStocks
-if BridgeNet2 then
-    BuyItem = BridgeNet2.ReferenceBridge and BridgeNet2.ReferenceBridge("BuyItem") or nil
-    UpdStock = BridgeNet2.ReferenceBridge and BridgeNet2.ReferenceBridge("UpdStock") or nil
-    UpdatePlantStocks = BridgeNet2.ReferenceBridge and BridgeNet2.ReferenceBridge("UpdatePlantStocks") or nil
-end
+local PlaceItemEvent = BridgeNet2.ReferenceBridge("PlaceItem")
+local BuyItem = BridgeNet2.ReferenceBridge("BuyItem")
+local UpdStock = BridgeNet2.ReferenceBridge("UpdStock")
+local UpdatePlantStocks = BridgeNet2.ReferenceBridge("UpdatePlantStocks")
+local BuyGear = BridgeNet2.ReferenceBridge("BuyGear")
+local UpdGearStock = BridgeNet2.ReferenceBridge("UpdGearStock")
+local UpdateGearStocks = BridgeNet2.ReferenceBridge("UpdateGearStocks")
+local EquipBestBridge = BridgeNet2.ReferenceBridge("EquipBestBrainrots")
 
--- ===== CONFIG (defaults from your file) =====
-local RarityFilter = { -- default
-    ["Common"] = false,
-    ["Uncommon"] = false,
-    ["Rare"] = false,
-    ["Epic"] = false,
-    ["Legendary"] = true,
-    ["Mythic"] = true,
-    ["Godly"] = true,
-    ["Secret"] = true,
+-- CONFIG
+local CONFIG = {
+    PLANT_DELAY = 0.5,
+    PURCHASE_DELAY = 0.5,
+    WEBHOOK_URL = "https://discord.com/api/webhooks/1421051351026110494/0IaDOy1cq1sGzvSZv8N55qq_jR3d3t3F-9rU7CVOyXW4faYn29a5-LxhHOY5H8KrjIh1",
+    ON_COLOR = Color3.fromRGB(0, 170, 0),
+    OFF_COLOR = Color3.fromRGB(170, 0, 0),
+    RARITY_ON_COLOR = Color3.fromRGB(0, 150, 0),
+    RARITY_OFF_COLOR = Color3.fromRGB(150, 0, 0),
+    STATUS_NORMAL_COLOR = Color3.fromRGB(200, 200, 200),
+    STATUS_ERROR_COLOR = Color3.fromRGB(255, 120, 120),
 }
 
-local NOTIFY_RARITIES = {
-    ["Legendary"] = false,
-    ["Mythic"] = false,
-    ["Godly"] = false,
-    ["Secret"] = false,
+-- Rarity filters (Default)
+local ALL_RARITIES = {"Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Godly", "Secret"}
+local SeedRarityFilter = {
+    ["Common"] = false, ["Uncommon"] = false, ["Rare"] = false, ["Epic"] = false,
+    ["Legendary"] = true, ["Mythic"] = true, ["Godly"] = true, ["Secret"] = true
+}
+local GearRarityFilter = {
+    ["Common"] = false, ["Uncommon"] = false, ["Rare"] = false, ["Epic"] = true,
+    ["Legendary"] = true, ["Mythic"] = true, ["Godly"] = true, ["Secret"] = true
 }
 
-local WEBHOOK_URL = "https://discordapp.com/api/webhooks/1421339259364704317/Es50sPpGWfpmU4KtU-XHmdUUe6DBA3ZetEF1eckiWg9_njeInmont5_ZYo8xOIK4sGwi" -- (keep or change)
-local PURCHASE_DELAY = 0.5
+local NOTIFY_RARITIES_SEED = { ["Legendary"]=false, ["Mythic"]=false, ["Godly"]=false, ["Secret"]=false }
+local NOTIFY_RARITIES_GEAR = { ["Legendary"]=false, ["Mythic"]=false, ["Godly"]=false, ["Secret"]=false }
 
--- ===== STATE =====
-local AutoBuyEnabled = false
-local IsBuying = false
-local HubRunning = true
-
--- other feature flags
-local AutoFarmEnabled = false
-local AutoPlantSeedsEnabled = false
-local AutoPlantPlantsEnabled = false
-local AutoCollectEnabled = false
-local AutoWaterEnabled = false
-local AutoEquipBestEnabled = false
-
--- UI-held settings
-local UiSettings = {
-    PurchaseDelay = PURCHASE_DELAY,
-    BuyIgnoreSeeds = {}, -- table of names to ignore
-    BuyIgnoreGears = {},
-    EquipIntervalMinutes = 5,
-    CollectIntervalMinutes = 3,
+-- STATE FLAGS
+local State = {
+    AutoPlantEnabled = false,
+    IsPlanting = false,
+    AutoBuySeedsEnabled = false,
+    IsBuyingSeeds = false,
+    AutoBuyGearEnabled = false,
+    IsBuyingGear = false,
+    AutoEquipEnabled = false,
+    EquipLoopHandle = nil,
+    EquipInterval = 60,
 }
 
--- ===== HELPERS =====
-local function Log(msg)
-    print(("[PvB Hub] %s"):format(msg))
-end
+-- =========================
+-- UI <-> Logic bridge (sync with UXUI's getgenv().AutoUI)
+-- =========================
+getgenv().AutoUI = getgenv().AutoUI or {}
+local UI = getgenv().AutoUI
 
-local function safeRequest(payload)
-    if not WEBHOOK_URL or WEBHOOK_URL == "" then
-        return false, "no webhook"
+UI.AutoPlantEnabled = UI.AutoPlantEnabled or false
+UI.AutoBuySeedsEnabled = UI.AutoBuySeedsEnabled or false
+UI.AutoBuyGearEnabled = UI.AutoBuyGearEnabled or false
+UI.AutoEquipEnabled = UI.AutoEquipEnabled or false
+UI.EquipInterval = UI.EquipInterval or State.EquipInterval or 60
+UI.SeedRarityFilter = UI.SeedRarityFilter or { Epic=true, Legendary=true, Mythic=true, Godly=true, Secret=true }
+UI.GearRarityFilter = UI.GearRarityFilter or { Epic=true, Legendary=true, Mythic=true, Godly=true, Secret=true }
+
+local lastUI = {
+    AutoPlantEnabled = UI.AutoPlantEnabled,
+    AutoBuySeedsEnabled = UI.AutoBuySeedsEnabled,
+    AutoBuyGearEnabled = UI.AutoBuyGearEnabled,
+    AutoEquipEnabled = UI.AutoEquipEnabled,
+    EquipInterval = UI.EquipInterval
+}
+
+local function copyFiltersFromUI()
+    for k,v in pairs(UI.SeedRarityFilter or {}) do
+        if SeedRarityFilter[k] ~= nil then SeedRarityFilter[k] = v end
     end
-    local success, err = pcall(function()
-        request({
-            Url = WEBHOOK_URL,
-            Method = "POST",
-            Headers = { ["Content-Type"] = "application/json" },
-            Body = HttpService:JSONEncode(payload),
-        })
-    end)
-    return success, err
-end
-
-local function ParseIgnoreList(text)
-    local t = {}
-    for s in string.gmatch(text or "", "([^,]+)") do
-        s = s:gsub("^%s+", ""):gsub("%s+$", "")
-        if s ~= "" then table.insert(t, s) end
+    for k,v in pairs(UI.GearRarityFilter or {}) do
+        if GearRarityFilter[k] ~= nil then GearRarityFilter[k] = v end
     end
-    return t
 end
 
-local function CanBuyMore(seedName, price)
-    -- check money
-    if PlayerData and PlayerData.Data and PlayerData.Data.Money and price then
-        if PlayerData.Data.Money < price then
-            return false, "not enough money"
+local function applyUIToState()
+    if UI.AutoPlantEnabled ~= lastUI.AutoPlantEnabled then
+        State.AutoPlantEnabled = UI.AutoPlantEnabled
+        if State.AutoPlantEnabled then pcall(function() startPlantingProcess() end) else State.IsPlanting = false end
+        lastUI.AutoPlantEnabled = UI.AutoPlantEnabled
+    end
+
+    if UI.AutoBuySeedsEnabled ~= lastUI.AutoBuySeedsEnabled then
+        State.AutoBuySeedsEnabled = UI.AutoBuySeedsEnabled
+        if State.AutoBuySeedsEnabled then pcall(function() AutoBuySeeds() end) end
+        lastUI.AutoBuySeedsEnabled = UI.AutoBuySeedsEnabled
+    end
+
+    if UI.AutoBuyGearEnabled ~= lastUI.AutoBuyGearEnabled then
+        State.AutoBuyGearEnabled = UI.AutoBuyGearEnabled
+        if State.AutoBuyGearEnabled then pcall(function() AutoBuyGears() end) end
+        lastUI.AutoBuyGearEnabled = UI.AutoBuyGearEnabled
+    end
+
+    if UI.AutoEquipEnabled ~= lastUI.AutoEquipEnabled then
+        State.AutoEquipEnabled = UI.AutoEquipEnabled
+        if State.AutoEquipEnabled then pcall(function() startEquipLoop() end) else pcall(function() stopEquipLoop() end) end
+        lastUI.AutoEquipEnabled = UI.AutoEquipEnabled
+    end
+
+    if UI.EquipInterval ~= lastUI.EquipInterval then
+        local v = tonumber(UI.EquipInterval)
+        if v and v >= 1 then
+            State.EquipInterval = math.floor(v)
+            UI.EquipInterval = State.EquipInterval
+            lastUI.EquipInterval = State.EquipInterval
+        else
+            UI.EquipInterval = State.EquipInterval
+            lastUI.EquipInterval = State.EquipInterval
         end
     end
-    -- check inventory capacity if Util available
-    if Util and LocalPlayer and LocalPlayer.Backpack then
-        local maxSpace = pcall(function() return Util:GetMaxInventorySpace(LocalPlayer) end) and Util:GetMaxInventorySpace(LocalPlayer) or nil
-        if maxSpace and #LocalPlayer.Backpack:GetChildren() >= maxSpace then
-            return false, "inventory full"
-        end
-    end
-    return true
+
+    copyFiltersFromUI()
 end
 
--- ===== CORE: AutoBuySeeds (adapted) =====
-local function AutoBuySeeds()
-    if not AutoBuyEnabled then Log("AutoBuy OFF") return end
-    if IsBuying then Log("Already buying, skip") return end
-    IsBuying = true
-    Log("AutoBuy: scanning seeds...")
+local function writeStateToUI()
+    if UI.AutoPlantEnabled ~= State.AutoPlantEnabled then UI.AutoPlantEnabled = State.AutoPlantEnabled end
+    if UI.AutoBuySeedsEnabled ~= State.AutoBuySeedsEnabled then UI.AutoBuySeedsEnabled = State.AutoBuySeedsEnabled end
+    if UI.AutoBuyGearEnabled ~= State.AutoBuyGearEnabled then UI.AutoBuyGearEnabled = State.AutoBuyGearEnabled end
+    if UI.AutoEquipEnabled ~= State.AutoEquipEnabled then UI.AutoEquipEnabled = State.AutoEquipEnabled end
+    if UI.EquipInterval ~= State.EquipInterval then UI.EquipInterval = State.EquipInterval end
 
-    local itemsForNotification = {}
+    for k,_ in pairs(UI.SeedRarityFilter or {}) do UI.SeedRarityFilter[k] = SeedRarityFilter[k] end
+    for k,_ in pairs(UI.GearRarityFilter or {}) do UI.GearRarityFilter[k] = GearRarityFilter[k] end
+end
 
-    if not SeedAssets or not PlantsAssets then
-        Log("Seed/Plant assets not found in ReplicatedStorage")
-        IsBuying = false
+spawn(function()
+    while true do
+        pcall(function()
+            applyUIToState()
+            writeStateToUI()
+        end)
+        task.wait(0.5)
+    end
+end)
+
+backpack.ChildAdded:Connect(function(child)
+    if UI.AutoPlantEnabled and not State.IsPlanting and child:IsA("Tool") and child:GetAttribute("Plant") then
+        task.wait(0.3)
+        pcall(function() startPlantingProcess() end)
+    end
+end)
+
+-- =========================
+-- HELPER FUNCTIONS
+-- =========================
+local function safeLog(prefix, msg)
+    print(string.format("[%s] %s", prefix, tostring(msg)))
+end
+
+local StatusLabels = {} -- placeholder used by UI below; updated by logic
+local function updateStatusLabel(idx, text, isError)
+    local lbl = StatusLabels[idx]
+    if lbl then
+        lbl.Text = "Status: " .. tostring(text)
+        lbl.TextColor3 = isError and CONFIG.STATUS_ERROR_COLOR or CONFIG.STATUS_NORMAL_COLOR
+    end
+end
+
+-- =========================
+-- AUTOPLANT LOGIC
+-- =========================
+local function getPlayerPlot(player)
+    local Plots = workspace:FindFirstChild("Plots")
+    if not Plots then return nil end
+    for i = 1, 6 do
+        local plot = Plots:FindFirstChild(tostring(i))
+        local playerSign = plot and plot:FindFirstChild("PlayerSign")
+        local displayLabel = playerSign and playerSign:FindFirstChild("BillboardGui") and playerSign.BillboardGui:FindFirstChild("TextLabel")
+        if displayLabel and displayLabel.Text == player.DisplayName then
+            return plot
+        end
+    end
+    return nil
+end
+
+local function collectPlantableParts(plot)
+    local rows = plot:FindFirstChild("Rows")
+    if not rows then return {} end
+    local plantableParts = {}
+    for _, part in pairs(rows:GetDescendants()) do
+        if part:IsA("BasePart") and part.BrickColor == BrickColor.new("Parsley green") and part.Parent.Name == "Grass" then
+            table.insert(plantableParts, part)
+        end
+    end
+    return plantableParts
+end
+
+local function plantSeedsCoroutine(plot, seedsToPlant)
+    State.IsPlanting = true
+    updateStatusLabel(1, "Preparing to plant...", false)
+
+    local plantableParts = collectPlantableParts(plot)
+    if #plantableParts == 0 then
+        updateStatusLabel(1, "No valid planting spots!", true)
+        State.IsPlanting = false
         return
     end
 
-    for _, seedData in pairs(SeedAssets:GetChildren()) do
+    for _, tool in ipairs(seedsToPlant) do
+        local seedName = tool:GetAttribute("Plant")
+        local seedAmount = tool:GetAttribute("Uses") or 1
+
+        humanoid:EquipTool(tool)
+        task.wait(0.2)
+
+        for i = 1, seedAmount do
+            if not State.AutoPlantEnabled then
+                updateStatusLabel(1, "Cancelled.", false)
+                humanoid:UnequipTools()
+                State.IsPlanting = false
+                return
+            end
+
+            updateStatusLabel(1, ("Planting %s (%d/%d)..."):format(seedName, i, seedAmount), false)
+            local randomPart = plantableParts[math.random(#plantableParts)]
+            local size = randomPart.Size
+            local randomPosition = randomPart.Position + Vector3.new(
+                math.random(-size.X / 2, size.X / 2),
+                0,
+                math.random(-size.Z / 2, size.Z / 2)
+            )
+
+            pcall(function()
+                PlaceItemEvent:Fire({
+                    ["Item"] = seedName,
+                    ["CFrame"] = CFrame.new(randomPosition),
+                    ["ID"] = tool:GetAttribute("ID"),
+                    ["Floor"] = randomPart
+                })
+            end)
+
+            task.wait(CONFIG.PLANT_DELAY)
+        end
+
+        task.wait(0.5)
+    end
+
+    humanoid:UnequipTools()
+    updateStatusLabel(1, "All seeds planted!", false)
+    State.IsPlanting = false
+end
+
+function startPlantingProcess()
+    if State.IsPlanting then return end
+    local playerPlot = getPlayerPlot(LocalPlayer)
+    if not playerPlot then
+        updateStatusLabel(1, "Your plot could not be found!", true)
+        return
+    end
+
+    local seedsInBackpack = {}
+    for _, item in ipairs(backpack:GetChildren()) do
+        if item and item:IsA("Tool") and item:GetAttribute("Plant") then
+            local plant = PlantsAssets:FindFirstChild(item:GetAttribute("Plant"))
+            local rarity = plant and plant:GetAttribute("Rarity") or "Common"
+            if string.lower(rarity) ~= "common" then
+                table.insert(seedsInBackpack, item)
+            end
+        end
+    end
+
+    if #seedsInBackpack == 0 then
+        updateStatusLabel(1, "No non-Common seeds found.", true)
+        return
+    end
+
+    coroutine.wrap(function() plantSeedsCoroutine(playerPlot, seedsInBackpack) end)()
+end
+
+backpack.ChildAdded:Connect(function(child)
+    if State.AutoPlantEnabled and not State.IsPlanting and child:IsA("Tool") and child:GetAttribute("Plant") then
+        task.wait(0.5)
+        startPlantingProcess()
+    end
+end)
+
+-- =========================
+-- AUTOBUY SEEDS
+-- =========================
+local function CanBuyMoreItem(price)
+    if not Data or not Util then return true end
+    if Data.Money < price then return false end
+    local maxSpace = Util:GetMaxInventorySpace(LocalPlayer)
+    if #LocalPlayer.Backpack:GetChildren() >= maxSpace then return false end
+    return true
+end
+
+function AutoBuySeeds()
+    if not State.AutoBuySeedsEnabled then return end
+    if State.IsBuyingSeeds then return end
+    State.IsBuyingSeeds = true
+    updateStatusLabel(2, "Checking seeds...", false)
+
+    local itemsForNotification = {}
+
+    for _, seedData in ipairs(SeedAssets:GetChildren()) do
+        local price = seedData:GetAttribute("Price")
         local seedName = seedData.Name
-        local price = seedData:GetAttribute("Price") or 0
-        local stock = seedData:GetAttribute("Stock") or 0
-        local plantName = seedData:GetAttribute("Plant") or ""
-        local plant = PlantsAssets:FindFirstChild(plantName)
+        local plant = PlantsAssets:FindFirstChild(seedData:GetAttribute("Plant"))
         local rarity = plant and plant:GetAttribute("Rarity") or "Common"
+        local stock = seedData:GetAttribute("Stock") or 0
 
-        -- ignore lists
-        local ignored = false
-        for _, v in ipairs(UiSettings.BuyIgnoreSeeds) do
-            if v ~= "" and string.lower(v) == string.lower(seedName) then ignored = true break end
-        end
-        if ignored then
-            Log("Ignoring seed (user list) -> " .. seedName)
-            continue
-        end
-
-        -- rarity filter check
-        if RarityFilter[rarity] and stock > 0 then
+        if SeedRarityFilter[rarity] and stock > 0 then 
             local purchasedCount = 0
             for i = 1, stock do
-                local canBuy, reason = CanBuyMore(seedName, price)
-                if not canBuy then
-                    Log("Stop buying " .. seedName .. " (" .. (reason or "no reason") .. ")")
-                    break
-                end
-
-                -- fire buy (if remote available), else simulate
-                if BuyItem and pcall(function() BuyItem:Fire(seedName) end) then
-                    -- remote fired
-                else
-                    -- If no remote available, try common ReplicatedStorage remotes as fallback
-                    local successFallback = pcall(function()
-                        local r = ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("BuyItem")
-                        if r and r.FireServer then r:FireServer(seedName) end
-                    end)
-                    if not successFallback then
-                        -- can't actually buy on client side; log and break
-                        Log("BuyItem remote not found/usable, simulated buy for " .. seedName)
-                    end
-                end
-
+                if not CanBuyMoreItem(price) then break end
+                pcall(function() BuyItem:Fire(seedName) end)
                 purchasedCount = purchasedCount + 1
-                Log(("Bought 1x %s | price=%s"):format(seedName, tostring(price)))
-                task.wait(UiSettings.PurchaseDelay or 0.5)
+                safeLog("AutoBuySeeds", ("Bought 1x %s"):format(seedName))
+                task.wait(CONFIG.PURCHASE_DELAY)
             end
-
-            if purchasedCount > 0 and NOTIFY_RARITIES[rarity] then
+            if purchasedCount > 0 and NOTIFY_RARITIES_SEED[rarity] then
                 table.insert(itemsForNotification, {Name = seedName, Rarity = rarity, Quantity = purchasedCount})
             end
+        end
+    end
+
+    State.IsBuyingSeeds = false
+    updateStatusLabel(2, "Finished buy cycle", false)
+end
+
+UpdStock:Connect(function(seedName)
+    if State.AutoBuySeedsEnabled then task.wait(3); AutoBuySeeds() end
+end)
+UpdatePlantStocks:Connect(function()
+    if State.AutoBuySeedsEnabled then task.wait(4); AutoBuySeeds() end
+end)
+LocalPlayer:GetAttributeChangedSignal("NextSeedRestock"):Connect(function()
+    if State.AutoBuySeedsEnabled and LocalPlayer:GetAttribute("NextSeedRestock") == 0 then
+        task.wait(5); AutoBuySeeds()
+    end
+end)
+
+-- =========================
+-- AUTOBUY GEAR
+-- =========================
+local function CanBuyMoreGear(price)
+    if not Data or not Util then return true end
+    if Data.Money < price then return false end
+    local maxSpace = Util:GetMaxInventorySpace(LocalPlayer)
+    if #LocalPlayer.Backpack:GetChildren() >= maxSpace then return false end
+    return true
+end
+
+function AutoBuyGears()
+    if not State.AutoBuyGearEnabled then return end
+    if State.IsBuyingGear then return end
+    State.IsBuyingGear = true
+    updateStatusLabel(3, "Checking gears...", false)
+
+    local itemsForNotification = {}
+
+    for _, gear in ipairs(GearAssets:GetChildren()) do
+        local price = gear:GetAttribute("Price")
+        local rarity = gear:GetAttribute("Rarity")
+        local stock = gear:GetAttribute("Stock") or 0
+        local gearName = gear.Name
+
+        if GearRarityFilter[rarity] and stock > 0 then
+            local purchasedCount = 0
+            for i = 1, stock do
+                if not CanBuyMoreGear(price) then break end
+                pcall(function() BuyGear:Fire(gearName) end)
+                purchasedCount = purchasedCount + 1
+                safeLog("AutoBuyGear", ("Bought 1x %s"):format(gearName))
+                task.wait(CONFIG.PURCHASE_DELAY)
+            end
+            if purchasedCount > 0 and NOTIFY_RARITIES_GEAR[rarity] then
+                table.insert(itemsForNotification, {Name = gearName, Rarity = rarity, Quantity = purchasedCount})
+            end
+        end
+    end
+
+    State.IsBuyingGear = false
+    updateStatusLabel(3, "Finished buy cycle", false)
+end
+
+UpdGearStock:Connect(function(gearName)
+    if State.AutoBuyGearEnabled then task.wait(3); AutoBuyGears() end
+end)
+UpdateGearStocks:Connect(function()
+    if State.AutoBuyGearEnabled then task.wait(4); AutoBuyGears() end
+end)
+LocalPlayer:GetAttributeChangedSignal("NextGearRestock"):Connect(function()
+    if State.AutoBuyGearEnabled and LocalPlayer:GetAttribute("NextGearRestock") == 0 then
+        task.wait(5); AutoBuyGears()
+    end
+end)
+
+-- =========================
+-- AUTOEQUIPBEST
+-- =========================
+function startEquipLoop()
+    if State.EquipLoopHandle then return end
+    State.AutoEquipEnabled = true
+    updateStatusLabel(4, "Equip loop running", false)
+    State.EquipLoopHandle = task.spawn(function()
+        while State.AutoEquipEnabled do
+            pcall(function()
+                EquipBestBridge:Fire()
+            end)
+            local timeWaited = State.EquipInterval
+            while timeWaited > 0 and State.AutoEquipEnabled do
+                task.wait(1)
+                timeWaited = timeWaited - 1
+                updateStatusLabel(4, "Equipped best gear. Next in " .. timeWaited .. "s", false)
+            end
+        end
+        State.EquipLoopHandle = nil
+        updateStatusLabel(4, "Equip loop stopped", false)
+    end)
+end
+
+function stopEquipLoop()
+    State.AutoEquipEnabled = false
+    if State.EquipLoopHandle then
+        task.cancel(State.EquipLoopHandle)
+    end
+    State.EquipLoopHandle = nil
+    updateStatusLabel(4, "Stopped", false)
+end
+
+-- =========================
+-- UX / UI (derived from UXUI.txt, unchanged visuals & behavior)
+-- =========================
+
+-- Try to obtain bridges (safe)
+local function safeRequireBridge(name)
+    local ok, BridgeNet2_local = pcall(function()
+        return require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Utility"):WaitForChild("BridgeNet2"))
+    end)
+    if not ok or not BridgeNet2_local then return nil end
+    local ok2, ref = pcall(function() return BridgeNet2_local.ReferenceBridge(name) end)
+    if ok2 then return ref end
+    return nil
+end
+
+local PlaceItemEvent_UI = safeRequireBridge("PlaceItem")
+local BuyItem_UI = safeRequireBridge("BuyItem")
+local BuyGear_UI = safeRequireBridge("BuyGear")
+local EquipBestBridge_UI = safeRequireBridge("EquipBestBrainrots")
+
+-- Ensure shared config table (G = getgenv().AutoUI)
+local G = getgenv().AutoUI
+
+-- Helper: create UI instances
+local function new(class, props)
+    local obj = Instance.new(class)
+    if props then
+        for k,v in pairs(props) do obj[k] = v end
+    end
+    return obj
+end
+
+-- Root screen gui
+local screen = new("ScreenGui", { Name = "AutoControllerUI", Parent = playerGui, ZIndexBehavior = Enum.ZIndexBehavior.Sibling })
+-- Main card
+local card = new("Frame", {
+    Parent = screen,
+    Size = UDim2.new(0, 520, 0, 500),
+    Position = UDim2.new(0.5, -260, 0.15, 0),
+    BackgroundColor3 = Color3.fromRGB(22, 22, 31),
+})
+new("UICorner", { Parent = card, CornerRadius = UDim.new(0,12) })
+
+-- Title bar
+local titleBar = new("Frame", { Parent = card, Size = UDim2.new(1,0,0,54), BackgroundColor3 = Color3.fromRGB(28,30,35) })
+new("UICorner", { Parent = titleBar, CornerRadius = UDim.new(0, 12) })
+local title = new("TextLabel", {
+    Parent = titleBar,
+    Size = UDim2.new(1,-20,1,0),
+    Position = UDim2.new(0,10,0,0),
+    BackgroundTransparency = 1,
+    Text = "No Pro No Life",
+    Font = Enum.Font.GothamBold,
+    TextSize = 22,
+    TextColor3 = Color3.fromRGB(235,235,240),
+    TextXAlignment = Enum.TextXAlignment.Left
+})
+
+-- Close button
+local CloseBtn = Instance.new("TextButton")
+CloseBtn.Parent = titleBar
+CloseBtn.Size = UDim2.new(0, 40, 0, 40)
+CloseBtn.Position = UDim2.new(1, -48, 0.5, -20)
+CloseBtn.BackgroundColor3 = Color3.fromRGB(45,45,50)
+CloseBtn.Text = "X"
+CloseBtn.Font = Enum.Font.GothamBold
+CloseBtn.TextSize = 20
+CloseBtn.TextColor3 = Color3.fromRGB(220,220,220)
+CloseBtn.AutoButtonColor = false
+Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 8)
+
+CloseBtn.MouseEnter:Connect(function()
+    TweenService:Create(CloseBtn, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(200,80,80)}):Play()
+end)
+CloseBtn.MouseLeave:Connect(function()
+    TweenService:Create(CloseBtn, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(45,45,50)}):Play()
+end)
+CloseBtn.MouseButton1Click:Connect(function()
+    card.Visible = false
+end)
+
+UserInputService.InputBegan:Connect(function(input, gpe)
+    if gpe then return end
+    if input.KeyCode == Enum.KeyCode.LeftAlt then
+        card.Visible = not card.Visible
+    end
+end)
+
+-- Content area
+local content = new("Frame", { Parent = card, Position = UDim2.new(0, 16, 0, 64), Size = UDim2.new(1, -32, 1, -80), BackgroundTransparency = 1 })
+local leftCol = new("Frame", { Parent = content, Size = UDim2.new(0.5, -8, 1, 0), BackgroundTransparency = 1 })
+local rightCol = new("Frame", { Parent = content, Size = UDim2.new(0.5, -8, 1, 0), Position = UDim2.new(0.5, 16, 0, 0), BackgroundTransparency = 1 })
+
+local ON_COLOR = Color3.fromRGB(60,179,135)
+local OFF_COLOR = Color3.fromRGB(70, 78, 86)
+local STAT_COLOR = Color3.fromRGB(230, 230, 235)
+
+local function makeToggle(parent, name, y, initialState, onChange)
+    local container = new("Frame", { Parent = parent, Size = UDim2.new(1,0,0,72), Position = UDim2.new(0,0,0,y), BackgroundTransparency = 1 })
+    local label = new("TextLabel", {
+        Parent = container,
+        Size = UDim2.new(1,0,0,28),
+        Position = UDim2.new(0,0,0,0),
+        BackgroundTransparency = 1,
+        Text = name,
+        Font = Enum.Font.GothamSemibold,
+        TextSize = 18,
+        TextColor3 = Color3.fromRGB(255,255,255),
+        TextXAlignment = Enum.TextXAlignment.Left
+    })
+    local status = new("TextLabel", {
+        Parent = container,
+        Size = UDim2.new(1,0,0,18),
+        Position = UDim2.new(0,0,0,30),
+        BackgroundTransparency = 1,
+        Text = "Status: Disabled",
+        Font = Enum.Font.Gotham,
+        TextSize = 14,
+        TextColor3 = STAT_COLOR,
+        TextXAlignment = Enum.TextXAlignment.Left
+    })
+    local pill = new("TextButton", {
+        Parent = container,
+        Size = UDim2.new(0, 70, 0, 28),
+        Position = UDim2.new(1, -80, 0, 4),
+        BackgroundColor3 = initialState and ON_COLOR or OFF_COLOR,
+        Text = initialState and "ON" or "OFF",
+        Font = Enum.Font.GothamBold,
+        TextSize = 14,
+        TextColor3 = Color3.fromRGB(20,20,20),
+    })
+    new("UICorner", { Parent = pill, CornerRadius = UDim.new(0,14) })
+
+    pill.MouseEnter:Connect(function() TweenService:Create(pill, TweenInfo.new(0.12), {Size = pill.Size + UDim2.new(0,8,0,4)}):Play() end)
+    pill.MouseLeave:Connect(function() TweenService:Create(pill, TweenInfo.new(0.12), {Size = UDim2.new(0,70,0,28)}):Play() end)
+
+    local state = initialState
+    pill.MouseButton1Click:Connect(function()
+        state = not state
+        pill.BackgroundColor3 = state and ON_COLOR or OFF_COLOR
+        pill.Text = state and "ON" or "OFF"
+        status.Text = "Status: " .. (state and "Enabled" or "Disabled")
+        if onChange then pcall(onChange, state) end
+    end)
+
+    table.insert(StatusLabels, status)
+    return { Container = container, Label = label, Status = status, Pill = pill }
+end
+
+-- Create toggles and bind to getgenv().AutoUI (G)
+local t1 = makeToggle(leftCol, "AutoPlant", 0, G.AutoPlantEnabled, function(s) G.AutoPlantEnabled = s end)
+local t2 = makeToggle(leftCol, "AutoBuy Seeds", 72, G.AutoBuySeedsEnabled, function(s) G.AutoBuySeedsEnabled = s end)
+local t3 = makeToggle(rightCol, "AutoBuy Gear", 0, G.AutoBuyGearEnabled, function(s) G.AutoBuyGearEnabled = s end)
+local t4 = makeToggle(rightCol, "AutoEquip Best", 72, G.AutoEquipEnabled, function(s)
+    G.AutoEquipEnabled = s
+    if s then pcall(function() if EquipBestBridge then EquipBestBridge:Fire() end end) end
+end)
+
+-- Settings area
+local settingsFrame = new("Frame", { Parent = content, Size = UDim2.new(1,0,0,160), Position = UDim2.new(0,0,0,150), BackgroundColor3 = Color3.fromRGB(24,26,30) })
+new("UICorner", { Parent = settingsFrame, CornerRadius = UDim.new(0,8) })
+local settingsTitle = new("TextLabel", { Parent = settingsFrame, Size = UDim2.new(1,0,0,28), BackgroundTransparency = 1, Text = "Rarity & Timing", Font = Enum.Font.GothamBold, TextSize = 16, TextColor3 = Color3.fromRGB(215,215,220) })
+
+local intervalLabel = new("TextLabel", { Parent = settingsFrame, Size = UDim2.new(0,220,0,24), Position = UDim2.new(0,8,0,36), BackgroundTransparency = 1, Text = "AutoEquip Interval (seconds):", Font = Enum.Font.Gotham, TextSize = 14, TextColor3 = Color3.fromRGB(190,190,200), TextXAlignment = Enum.TextXAlignment.Left })
+local intervalBox = new("TextBox", { Parent = settingsFrame, Size = UDim2.new(0,80,0,26), Position = UDim2.new(0, 240, 0, 34), BackgroundColor3 = Color3.fromRGB(255,255,255), Text = tostring(G.EquipInterval), Font = Enum.Font.Gotham, TextColor3 = Color3.fromRGB(0,0,0), TextSize = 15, ClearTextOnFocus = false })
+new("UICorner", { Parent = intervalBox, CornerRadius = UDim.new(0,6) })
+
+intervalBox.FocusLost:Connect(function(enter)
+    if enter then
+        local v = tonumber(intervalBox.Text)
+        if v and v >= 1 then
+            G.EquipInterval = math.floor(v)
+            intervalBox.Text = tostring(G.EquipInterval)
         else
-            if RarityFilter[rarity] then
-                Log(("%s (%s) out of stock"):format(seedName, rarity))
-            end
+            intervalBox.Text = tostring(G.EquipInterval)
         end
     end
+end)
 
-    -- Discord notifications
-    if #itemsForNotification > 0 then
-        local embedFields = {}
-        local containsSecret = false
-        for _, item in ipairs(itemsForNotification) do
-            local fieldName = "🛒 " .. item.Name
-            if item.Rarity == "Secret" then
-                containsSecret = true
-                fieldName = "💎 **" .. item.Name .. "**"
-            end
-            table.insert(embedFields, {
-                name = fieldName,
-                value = string.format("Rarity: %s\nQuantity: **%d**", item.Rarity, item.Quantity),
-                inline = true
-            })
-        end
+local function rarityButton(rarity, filterTable)
+    local btn = new("TextButton", { Size = UDim2.new(0,34,0,34), BackgroundColor3 = filterTable[rarity] and Color3.fromRGB(60,179,135) or Color3.fromRGB(70,80,90), Text = rarity:sub(1,1), Font = Enum.Font.GothamBold, TextSize = 16, TextColor3 = Color3.fromRGB(245,245,245), AutoButtonColor = false })
+    new("UICorner", { Parent = btn, CornerRadius = UDim.new(1,0) })
+    btn.MouseButton1Click:Connect(function()
+        filterTable[rarity] = not filterTable[rarity]
+        btn.BackgroundColor3 = filterTable[rarity] and Color3.fromRGB(60,179,135) or Color3.fromRGB(70,80,90)
+    end)
+    btn.MouseEnter:Connect(function() TweenService:Create(btn, TweenInfo.new(0.12), {Size = UDim2.new(0,38,0,38)}):Play() end)
+    btn.MouseLeave:Connect(function() TweenService:Create(btn, TweenInfo.new(0.12), {Size = UDim2.new(0,34,0,34)}):Play() end)
+    return btn
+end
 
-        local payload = {
-            username = LocalPlayer.Name .. " - AutoBuyBot",
-            embeds = { {
-                title = containsSecret and "🚨 SECRET PURCHASE SUMMARY 🚨" or "Purchase Summary",
-                description = "The following items were automatically purchased:",
-                color = containsSecret and 15252098 or 4886754,
-                fields = embedFields,
-                footer = { text = "Player: " .. LocalPlayer.Name},
-                timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ", os.time())
-            } }
-        }
-        if containsSecret then payload.content = "**SECRET SEED ALERT!**" end
-        pcall(function() safeRequest(payload) end)
-        Log("Sent purchase summary payload")
+local seedLabel = new("TextLabel", { Parent = settingsFrame, Size = UDim2.new(0.4,0,0,21), Position = UDim2.new(0,8,0,69), BackgroundTransparency = 1, Text = "AutoBuy Seeds Filter:", Font = Enum.Font.Gotham, TextSize = 14, TextColor3 = Color3.fromRGB(190,190,200), TextXAlignment = Enum.TextXAlignment.Left })
+local seedFlow = new("Frame", { Parent = settingsFrame, Size = UDim2.new(0.6, -16, 0, 34), Position = UDim2.new(0.4, 8, 0, 64), BackgroundTransparency = 1 })
+local seedLayout = new("UIListLayout", { Parent = seedFlow, FillDirection = Enum.FillDirection.Horizontal, HorizontalAlignment = Enum.HorizontalAlignment.Left, Padding = UDim.new(0,8) })
+
+local rarities = {"Epic","Legendary","Mythic","Godly","Secret"}
+for _, r in ipairs(rarities) do
+    local btn = rarityButton(r, G.SeedRarityFilter)
+    btn.Parent = seedFlow
+end
+
+local gearLabel = new("TextLabel", { Parent = settingsFrame, Size = UDim2.new(0.4,0,0,29), Position = UDim2.new(0,8,0,120), BackgroundTransparency = 1, Text = "AutoBuy Gear Filter:", Font = Enum.Font.Gotham, TextSize = 14, TextColor3 = Color3.fromRGB(190,190,200), TextXAlignment = Enum.TextXAlignment.Left })
+local gearFlow = new("Frame", { Parent = settingsFrame, Size = UDim2.new(0.6, -16, 0, 34), Position = UDim2.new(0.4, 8, 0, 116), BackgroundTransparency = 1 })
+local gearLayout = new("UIListLayout", { Parent = gearFlow, FillDirection = Enum.FillDirection.Horizontal, HorizontalAlignment = Enum.HorizontalAlignment.Left, Padding = UDim.new(0,8) })
+
+for _, r in ipairs(rarities) do
+    local btn = rarityButton(r, G.GearRarityFilter)
+    btn.Parent = gearFlow
+end
+
+-- Console panel (debug)
+local console = new("TextLabel", { Parent = screen, Size = UDim2.new(0.28,0,0.18,0), Position = UDim2.new(0.5, 80, 0.015, 0), BackgroundColor3 = Color3.fromRGB(10,10,12), TextColor3 = Color3.fromRGB(190,190,200), Font = Enum.Font.Code, TextSize = 12, Text = "", Visible = false })
+new("UICorner", { Parent = console, CornerRadius = UDim.new(0,6) })
+local function refreshConsole()
+    local lines = {
+        ("Plant: %s"):format(tostring(G.AutoPlantEnabled)),
+        ("BuySeeds: %s"):format(tostring(G.AutoBuySeedsEnabled)),
+        ("BuyGear: %s"):format(tostring(G.AutoBuyGearEnabled)),
+        ("Equip: %s (interval=%ss)"):format(tostring(G.AutoEquipEnabled), tostring(G.EquipInterval)),
+        ("SeedFilter: "..table.concat((function()
+            local t={} for k,v in pairs(G.SeedRarityFilter) do if v then table.insert(t,k:sub(1,1)) end end return t end)(),","))
+    }
+    console.Text = table.concat(lines, "\n")
+end
+refreshConsole()
+
+UserInputService.InputBegan:Connect(function(inp, gpe)
+    if gpe then return end
+    if inp.KeyCode == Enum.KeyCode.RightControl then
+        console.Visible = not console.Visible
+        refreshConsole()
     end
+end)
 
-    IsBuying = false
-    Log("AutoBuy cycle finished")
-end
+spawn(function()
+    while task.wait(2) do
+        refreshConsole()
+    end
+end)
 
--- ===== EVENT HOOKS (react to game events if available) =====
-if UpdStock and UpdStock.Connect then
-    UpdStock:Connect(function(seedName)
-        Log("UpdStock event -> " .. tostring(seedName))
-        task.wait(3)
-        AutoBuySeeds()
-    end)
-end
-
-if UpdatePlantStocks and UpdatePlantStocks.Connect then
-    UpdatePlantStocks:Connect(function()
-        Log("UpdatePlantStocks event")
-        task.wait(4)
-        AutoBuySeeds()
-    end)
-end
-
-if LocalPlayer and LocalPlayer:GetAttributeChangedSignal then
-    if LocalPlayer:GetAttributeChangedSignal("NextSeedRestock") then
-        LocalPlayer:GetAttributeChangedSignal("NextSeedRestock"):Connect(function()
-            if LocalPlayer:GetAttribute("NextSeedRestock") == 0 then
-                Log("NextSeedRestock == 0")
-                task.wait(5)
-                AutoBuySeeds()
+-- Dragging the card
+local dragging, dragStart, startPos = false, nil, nil
+titleBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+        dragStart = input.Position
+        startPos = card.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
             end
         end)
     end
-end
-
--- ===== GUI CREATION (simplified but styled) =====
-local playerGui = LocalPlayer:WaitForChild("PlayerGui")
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "PvB_Hub_GUI"
-screenGui.ResetOnSpawn = false
-screenGui.Parent = playerGui
-
--- background (dark)
-local bg = Instance.new("Frame")
-bg.Name = "Background"
-bg.Size = UDim2.new(1,0,1,0)
-bg.Position = UDim2.new(0,0,0,0)
-bg.BackgroundColor3 = Color3.fromRGB(18,18,20)
-bg.BorderSizePixel = 0
-bg.Parent = screenGui
-
--- Left Sidebar
-local sidebar = Instance.new("Frame")
-sidebar.Name = "Sidebar"
-sidebar.Size = UDim2.new(0, 180, 1, 0)
-sidebar.Position = UDim2.new(0,0,0,0)
-sidebar.BackgroundColor3 = Color3.fromRGB(28,28,30)
-sidebar.BorderSizePixel = 0
-sidebar.Parent = bg
-
-local sidebarTitle = Instance.new("TextLabel", sidebar)
-sidebarTitle.Size = UDim2.new(1,0,0,64)
-sidebarTitle.Position = UDim2.new(0,0,0,0)
-sidebarTitle.BackgroundTransparency = 1
-sidebarTitle.Text = "PvB Hub"
-sidebarTitle.Font = Enum.Font.GothamBold
-sidebarTitle.TextSize = 20
-sidebarTitle.TextColor3 = Color3.fromRGB(200,255,230)
-
--- sidebar buttons (Main, Progression, Webhooks, Settings)
-local tabButtons = {}
-local tabNames = {"Main","Progression","Webhooks","Settings"}
-local function createSidebarButton(text, y)
-    local b = Instance.new("TextButton")
-    b.Size = UDim2.new(1,-12,0,40)
-    b.Position = UDim2.new(0,6,0,y)
-    b.BackgroundColor3 = Color3.fromRGB(22,22,24)
-    b.BorderSizePixel = 0
-    b.Text = text
-    b.Font = Enum.Font.Gotham
-    b.TextSize = 14
-    b.TextColor3 = Color3.fromRGB(170,170,170)
-    b.Parent = sidebar
-    return b
-end
-
-for i, name in ipairs(tabNames) do
-    local but = createSidebarButton(name, 64 + (i-1)*48)
-    tabButtons[name] = but
-end
-
--- Main content area
-local mainArea = Instance.new("Frame")
-mainArea.Name = "MainArea"
-mainArea.Size = UDim2.new(1, -180, 1, 0)
-mainArea.Position = UDim2.new(0, 180, 0, 0)
-mainArea.BackgroundTransparency = 1
-mainArea.Parent = bg
-
--- Tab frames
-local Tabs = {}
-for _, name in ipairs(tabNames) do
-    local t = Instance.new("Frame")
-    t.Name = name .. "Tab"
-    t.Size = UDim2.new(1,0,1,0)
-    t.Position = UDim2.new(0,0,0,0)
-    t.BackgroundTransparency = 1
-    t.Visible = false
-    t.Parent = mainArea
-    Tabs[name] = t
-end
-Tabs["Main"].Visible = true -- default
-
--- Basic function to create a "card" in a parent at x,y
-local function CreateCard(parent, title, posY)
-    local card = Instance.new("Frame")
-    card.Size = UDim2.new(0, 420, 0, 120)
-    card.Position = UDim2.new(0, 16, 0, posY)
-    card.BackgroundColor3 = Color3.fromRGB(26,26,28)
-    card.BorderSizePixel = 0
-    card.Parent = parent
-
-    local t = Instance.new("TextLabel")
-    t.Size = UDim2.new(1,-16,0,20)
-    t.Position = UDim2.new(0,8,0,8)
-    t.BackgroundTransparency = 1
-    t.Text = title
-    t.Font = Enum.Font.GothamSemibold
-    t.TextSize = 14
-    t.TextColor3 = Color3.fromRGB(200,255,230)
-    t.TextXAlignment = Enum.TextXAlignment.Left
-    t.Parent = card
-
-    return card
-end
-
--- Toggle helper: returns function to get current state
-local function MakeToggle(card, default)
-    local tb = Instance.new("TextButton")
-    tb.Size = UDim2.new(0, 50, 0, 28)
-    tb.Position = UDim2.new(1, -66, 0, 12)
-    tb.BackgroundColor3 = default and Color3.fromRGB(36,160,122) or Color3.fromRGB(120,24,24)
-    tb.TextColor3 = Color3.fromRGB(255,255,255)
-    tb.Font = Enum.Font.GothamBold
-    tb.TextSize = 14
-    tb.Text = default and "ON" or "OFF"
-    tb.Parent = card
-
-    local state = default
-    tb.MouseButton1Click:Connect(function()
-        state = not state
-        tb.Text = state and "ON" or "OFF"
-        tb.BackgroundColor3 = state and Color3.fromRGB(36,160,122) or Color3.fromRGB(120,24,24)
-    end)
-    return function() return state, tb end, tb
-end
-
--- Input box helper
-local function MakeInput(card, labelText, default)
-    local l = Instance.new("TextLabel")
-    l.Size = UDim2.new(0.6, -10, 0, 20)
-    l.Position = UDim2.new(0, 8, 0, 36)
-    l.BackgroundTransparency = 1
-    l.Text = labelText
-    l.Font = Enum.Font.Gotham
-    l.TextSize = 12
-    l.TextColor3 = Color3.fromRGB(220,220,220)
-    l.TextXAlignment = Enum.TextXAlignment.Left
-    l.Parent = card
-
-    local box = Instance.new("TextBox")
-    box.Size = UDim2.new(0.95, -10, 0, 28)
-    box.Position = UDim2.new(0, 8, 0, 60)
-    box.Text = default or ""
-    box.Font = Enum.Font.Gotham
-    box.TextSize = 14
-    box.TextColor3 = Color3.fromRGB(240,240,240)
-    box.BackgroundColor3 = Color3.fromRGB(17,17,18)
-    box.BorderSizePixel = 0
-    box.Parent = card
-
-    return box
-end
-
--- Simple numeric control (label + - + value)
-local function MakeNumericControl(card, labelText, default, step)
-    local l = Instance.new("TextLabel")
-    l.Size = UDim2.new(0.6, -10, 0, 20)
-    l.Position = UDim2.new(0, 8, 0, 36)
-    l.BackgroundTransparency = 1
-    l.Text = labelText
-    l.Font = Enum.Font.Gotham
-    l.TextSize = 12
-    l.TextColor3 = Color3.fromRGB(220,220,220)
-    l.TextXAlignment = Enum.TextXAlignment.Left
-    l.Parent = card
-
-    local minus = Instance.new("TextButton")
-    minus.Size = UDim2.new(0, 24, 0, 24)
-    minus.Position = UDim2.new(0, 8, 0, 60)
-    minus.Text = "-"
-    minus.Font = Enum.Font.GothamBold
-    minus.TextSize = 18
-    minus.BackgroundColor3 = Color3.fromRGB(30,30,30)
-    minus.TextColor3 = Color3.fromRGB(220,220,220)
-    minus.Parent = card
-
-    local plus = Instance.new("TextButton")
-    plus.Size = UDim2.new(0, 24, 0, 24)
-    plus.Position = UDim2.new(0, 42, 0, 60)
-    plus.Text = "+"
-    plus.Font = Enum.Font.GothamBold
-    plus.TextSize = 18
-    plus.BackgroundColor3 = Color3.fromRGB(30,30,30)
-    plus.TextColor3 = Color3.fromRGB(220,220,220)
-    plus.Parent = card
-
-    local valLabel = Instance.new("TextLabel")
-    valLabel.Size = UDim2.new(0, 80, 0, 24)
-    valLabel.Position = UDim2.new(0, 80, 0, 60)
-    valLabel.BackgroundTransparency = 1
-    valLabel.Text = tostring(default)
-    valLabel.Font = Enum.Font.Gotham
-    valLabel.TextSize = 14
-    valLabel.TextColor3 = Color3.fromRGB(200,200,200)
-    valLabel.Parent = card
-
-    local value = default or 0
-    local st = step or 1
-    minus.MouseButton1Click:Connect(function()
-        value = math.max(0, value - st)
-        valLabel.Text = tostring(value)
-    end)
-    plus.MouseButton1Click:Connect(function()
-        value = value + st
-        valLabel.Text = tostring(value)
-    end)
-
-    return function() return value, valLabel end, minus, plus
-end
-
--- Create main cards similar to your screenshot
-local mainTab = Tabs["Main"]
-
--- Auto Buy Best (uses AutoBuy logic)
-local buyCard = CreateCard(mainTab, "Auto Buy Best", 16)
-local getBuyToggle, buyToggleButton = MakeToggle(buyCard, false)
-local ignoreBox = MakeInput(buyCard, "Ignore Seeds (comma-separated)", "Cactus Seed, Dragon Fruit")
-local buyDelayVal, _, _, _ = MakeNumericControl(buyCard, "Purchase Delay (s)", 0.5, 0.1)
-
--- hook input parse to UiSettings
-ignoreBox.FocusLost:Connect(function()
-    UiSettings.BuyIgnoreSeeds = ParseIgnoreList(ignoreBox.Text)
 end)
--- numeric control requires reading from valLabel - we will read buyDelayVal via closure
--- but we didn't expose buyDelayVal function to set UiSettings automatically; instead create a short updater:
-coroutine.wrap(function()
-    while HubRunning do
-        -- find the current numeric value label under buyCard and parse it
-        local valLabel = buyCard:FindFirstChildWhichIsA("TextLabel", true)
-        -- better: keep a direct reference from MakeNumericControl - we returned function earlier; simpler:
-        -- (we already have "buyDelayVal" closure - it's a function that returns current value)
-        local currentDelay = 0.5
-        -- attempt to read from the valLabel text of the numeric control we created:
-        local labels = {}
-        for _, child in ipairs(buyCard:GetChildren()) do
-            if child:IsA("TextLabel") and child.Text ~= "" and string.find(child.Text, "%d") then
-                table.insert(labels, child)
-            end
-        end
-        -- fallback to UiSettings.PurchaseDelay
-        UiSettings.PurchaseDelay = UiSettings.PurchaseDelay or PURCHASE_DELAY
-        UiSettings.PurchaseDelay = tonumber(buyDelayVal() or UiSettings.PurchaseDelay) or UiSettings.PurchaseDelay
-        task.wait(0.8)
-    end
-end)()
-
--- Auto Plant Seeds card
-local plantSeedsCard = CreateCard(mainTab, "Auto Plant (Seeds)", 152)
-local getPlantSeedsToggle, plantSeedsToggleBtn = MakeToggle(plantSeedsCard, false)
-local seedsToPlantBox = MakeInput(plantSeedsCard, "Seeds to Plant (comma-separated)", "")
-local collectAllBtn = Instance.new("TextButton")
-collectAllBtn.Size = UDim2.new(0, 150, 0, 28)
-collectAllBtn.Position = UDim2.new(0, 8, 0, 92)
-collectAllBtn.Text = "Collect All Plants"
-collectAllBtn.Font = Enum.Font.GothamBold
-collectAllBtn.TextSize = 14
-collectAllBtn.BackgroundColor3 = Color3.fromRGB(30,30,30)
-collectAllBtn.Parent = plantSeedsCard
-
-collectAllBtn.MouseButton1Click:Connect(function()
-    -- Placeholder: call server remote to collect plants
-    -- Add code here to call the correct remote event of the game
-    Log("Collect All Plants pressed (placeholder).")
-end)
-
-seedsToPlantBox.FocusLost:Connect(function()
-    -- parse and store
-    -- You can later use this list in the planting loop
-    local t = ParseIgnoreList(seedsToPlantBox.Text)
-    UiSettings.SeedsToPlant = t
-    Log("SeedsToPlant set: " .. tostring(#t) .. " items")
-end)
-
--- Auto Farm card (placeholder)
-local autoFarmCard = CreateCard(mainTab, "Auto Farm", 288)
-local getAutoFarmToggle, autoFarmTb = MakeToggle(autoFarmCard, false)
-local farmNote = Instance.new("TextLabel")
-farmNote.Size = UDim2.new(1, -16, 0, 56)
-farmNote.Position = UDim2.new(0, 8, 0, 36)
-farmNote.BackgroundTransparency = 1
-farmNote.Text = "AutoFarm placeholder - implement game-specific targeting & remotes."
-farmNote.Font = Enum.Font.Gotham
-farmNote.TextSize = 12
-farmNote.TextColor3 = Color3.fromRGB(180,180,180)
-farmNote.TextWrapped = true
-farmNote.Parent = autoFarmCard
-
--- Right column cards (Auto Collect, Auto Water, Auto Equip, Auto Buy Specific)
--- We'll place them on the right side of mainArea
-local rightColumn = Instance.new("Frame")
-rightColumn.Size = UDim2.new(0, 380, 1, 0)
-rightColumn.Position = UDim2.new(1, -400, 0, 16)
-rightColumn.BackgroundTransparency = 1
-rightColumn.Parent = mainTab
-
-local function CreateRightCard(parent, title, posY)
-    local c = Instance.new("Frame")
-    c.Size = UDim2.new(1, 0, 0, 120)
-    c.Position = UDim2.new(0, 0, 0, posY)
-    c.BackgroundColor3 = Color3.fromRGB(26,26,28)
-    c.BorderSizePixel = 0
-    c.Parent = parent
-
-    local t = Instance.new("TextLabel")
-    t.Size = UDim2.new(1,-16,0,20)
-    t.Position = UDim2.new(0,8,0,8)
-    t.BackgroundTransparency = 1
-    t.Text = title
-    t.Font = Enum.Font.GothamSemibold
-    t.TextSize = 14
-    t.TextColor3 = Color3.fromRGB(200,255,230)
-    t.TextXAlignment = Enum.TextXAlignment.Left
-    t.Parent = c
-
-    return c
-end
-
--- Auto Collect
-local collectCard = CreateRightCard(rightColumn, "Auto Collect", 0)
-local getCollectToggle, collectBtn = MakeToggle(collectCard, false)
-local collectIntervalVal, _, _, _ = MakeNumericControl(collectCard, "Collect Interval (Minutes)", 3, 1)
-collectBtn.MouseButton1Click:Connect(function() end) -- placeholder
-
--- Auto Water
-local waterCard = CreateRightCard(rightColumn, "Auto Water Bucket", 140)
-local getWaterToggle, waterBtn = MakeToggle(waterCard, false)
-local waterIntervalVal, _, _, _ = MakeNumericControl(waterCard, "Interval Per Use (Sec)", 0.5, 0.5)
-local waterFilterBox = MakeInput(waterCard, "Water Filter", "")
-
--- Auto Equip Best
-local equipCard = CreateRightCard(rightColumn, "Auto Equip Best", 280)
-local getEquipToggle, equipBtn = MakeToggle(equipCard, false)
-local equipIntervalVal, _, _, _ = MakeNumericControl(equipCard, "Equip Interval (Minutes)", 5, 1)
-
--- ===== BACKGROUND LOOPS FOR FEATURES (basic examples) =====
-
--- AutoBuy loop (continuously check while enabled)
-spawn(function()
-    while HubRunning do
-        if getBuyToggle() then
-            AutoBuyEnabled = true
-            -- update UiSettings purchase delay by reading the numeric label
-            -- We used closure earlier: buyDelayVal returns the value
-            UiSettings.PurchaseDelay = tonumber(tostring(buyDelayVal())) or UiSettings.PurchaseDelay or PURCHASE_DELAY
-            AutoBuySeeds()
-            -- after full scan, wait a bit
-            task.wait(3)
-        else
-            AutoBuyEnabled = false
-            task.wait(1)
-        end
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+        local delta = input.Position - dragStart
+        card.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
     end
 end)
 
--- AutoCollect example (trigger every interval minutes)
-spawn(function()
-    while HubRunning do
-        if getCollectToggle() then
-            -- do collect logic (placeholder)
-            Log("AutoCollect tick (placeholder).")
-            -- Here you would call relevant remote events to collect (e.g., CollectAll)
-            task.wait((UiSettings.CollectIntervalMinutes or 3) * 60)
-        else
-            task.wait(1)
-        end
-    end
-end)
-
--- AutoPlant Seeds example
-spawn(function()
-    while HubRunning do
-        if getPlantSeedsToggle() then
-            -- example: iterate over UiSettings.SeedsToPlant and call planting remote
-            local list = UiSettings.SeedsToPlant or {}
-            if #list > 0 then
-                Log("AutoPlantSeeds: attempting to plant " .. tostring(#list) .. " types (placeholder).")
-                -- Implement game-specific remote calls here
-            else
-                Log("AutoPlantSeeds enabled but no seeds specified.")
-            end
-            task.wait(2)
-        else
-            task.wait(0.7)
-        end
-    end
-end)
-
--- AutoFarm example
-spawn(function()
-    while HubRunning do
-        if getAutoFarmToggle() then
-            Log("AutoFarm: running placeholder attack routine.")
-            -- Implement targeting & attack remotes here
-            task.wait(1)
-        else
-            task.wait(0.8)
-        end
-    end
-end)
-
--- AutoEquip Best example
-spawn(function()
-    while HubRunning do
-        if getEquipToggle() then
-            Log("AutoEquipBest: swapping equips (placeholder).")
-            -- Implement equip selection logic with remotes/functions
-            task.wait((UiSettings.EquipIntervalMinutes or 5) * 60)
-        else
-            task.wait(1)
-        end
-    end
-end)
-
--- ===== TAB NAVIGATION =====
-for name, btn in pairs(tabButtons) do
-    btn.MouseButton1Click:Connect(function()
-        for tname, frame in pairs(Tabs) do
-            frame.Visible = (tname == name)
-        end
-        for _, b in pairs(tabButtons) do
-            b.TextColor3 = Color3.fromRGB(170,170,170)
-        end
-        btn.TextColor3 = Color3.fromRGB(200,255,230)
-    end)
-end
-
--- ===== CLEANUP ON LEAVE =====
-LocalPlayer.AncestryChanged:Connect(function(_, parent)
-    if not parent then
-        HubRunning = false
-    end
-end)
-
-Log("PvB Hub GUI loaded. Use the toggles to enable features. AutoBuy integrated.")
+-- Initial status labels
+for i=1,4 do updateStatusLabel(i, "Idle", false) end
+safeLog("CombinedAuto", "Merged script loaded and ready.")
