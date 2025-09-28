@@ -371,7 +371,7 @@ local Window = Rayfield:CreateWindow({
 local MainTab = Window:CreateTab("Main", 4483362458)
 
 -- Section: Core toggles
-MainTab:CreateSection("Core automation")
+MainTab:CreateSection("Automation (Select rarity before trun on automatic)")
 
 MainTab:CreateToggle({
     Name = "Auto Plant",
@@ -519,4 +519,5 @@ MainTab:CreateButton({
 
 -- Final log
 safeLog("CombinedAuto", "No Hack No Life loaded.")
+
 
