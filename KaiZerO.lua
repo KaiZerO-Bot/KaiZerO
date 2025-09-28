@@ -82,6 +82,7 @@ local State = {
 -- =========================
 -- UI <-> Logic bridge (sync with UXUI's getgenv().AutoUI)
 -- =========================
+
 getgenv().AutoUI = getgenv().AutoUI or {}
 local UI = getgenv().AutoUI
 
@@ -101,6 +102,38 @@ local lastUI = {
     EquipInterval = UI.EquipInterval
 }
 
+-- =========================
+-- CONFIG SAVE / LOAD
+-- =========================
+local CONFIG_FILE = "AutoControllerConfig.json"
+
+local function saveConfig()
+    local data = {
+        AutoPlantEnabled = UI.AutoPlantEnabled,
+        AutoBuySeedsEnabled = UI.AutoBuySeedsEnabled,
+        AutoBuyGearEnabled = UI.AutoBuyGearEnabled,
+        AutoEquipEnabled = UI.AutoEquipEnabled,
+        EquipInterval = UI.EquipInterval,
+        SeedRarityFilter = UI.SeedRarityFilter,
+        GearRarityFilter = UI.GearRarityFilter
+    }
+    local encoded = HttpService:JSONEncode(data)
+    pcall(function() writefile(CONFIG_FILE, encoded) end)
+end
+
+local function loadConfig()
+    if isfile(CONFIG_FILE) then
+        local ok, decoded = pcall(function()
+            return HttpService:JSONDecode(readfile(CONFIG_FILE))
+        end)
+        if ok and decoded then
+            for k,v in pairs(decoded) do
+                UI[k] = v
+            end
+        end
+    end
+end
+
 local function copyFiltersFromUI()
     for k,v in pairs(UI.SeedRarityFilter or {}) do
         if SeedRarityFilter[k] ~= nil then SeedRarityFilter[k] = v end
@@ -108,46 +141,6 @@ local function copyFiltersFromUI()
     for k,v in pairs(UI.GearRarityFilter or {}) do
         if GearRarityFilter[k] ~= nil then GearRarityFilter[k] = v end
     end
-end
-
-local function applyUIToState()
-    if UI.AutoPlantEnabled ~= lastUI.AutoPlantEnabled then
-        State.AutoPlantEnabled = UI.AutoPlantEnabled
-        if State.AutoPlantEnabled then pcall(function() startPlantingProcess() end) else State.IsPlanting = false end
-        lastUI.AutoPlantEnabled = UI.AutoPlantEnabled
-    end
-
-    if UI.AutoBuySeedsEnabled ~= lastUI.AutoBuySeedsEnabled then
-        State.AutoBuySeedsEnabled = UI.AutoBuySeedsEnabled
-        if State.AutoBuySeedsEnabled then pcall(function() AutoBuySeeds() end) end
-        lastUI.AutoBuySeedsEnabled = UI.AutoBuySeedsEnabled
-    end
-
-    if UI.AutoBuyGearEnabled ~= lastUI.AutoBuyGearEnabled then
-        State.AutoBuyGearEnabled = UI.AutoBuyGearEnabled
-        if State.AutoBuyGearEnabled then pcall(function() AutoBuyGears() end) end
-        lastUI.AutoBuyGearEnabled = UI.AutoBuyGearEnabled
-    end
-
-    if UI.AutoEquipEnabled ~= lastUI.AutoEquipEnabled then
-        State.AutoEquipEnabled = UI.AutoEquipEnabled
-        if State.AutoEquipEnabled then pcall(function() startEquipLoop() end) else pcall(function() stopEquipLoop() end) end
-        lastUI.AutoEquipEnabled = UI.AutoEquipEnabled
-    end
-
-    if UI.EquipInterval ~= lastUI.EquipInterval then
-        local v = tonumber(UI.EquipInterval)
-        if v and v >= 1 then
-            State.EquipInterval = math.floor(v)
-            UI.EquipInterval = State.EquipInterval
-            lastUI.EquipInterval = State.EquipInterval
-        else
-            UI.EquipInterval = State.EquipInterval
-            lastUI.EquipInterval = State.EquipInterval
-        end
-    end
-
-    copyFiltersFromUI()
 end
 
 local function writeStateToUI()
@@ -160,16 +153,6 @@ local function writeStateToUI()
     for k,_ in pairs(UI.SeedRarityFilter or {}) do UI.SeedRarityFilter[k] = SeedRarityFilter[k] end
     for k,_ in pairs(UI.GearRarityFilter or {}) do UI.GearRarityFilter[k] = GearRarityFilter[k] end
 end
-
-spawn(function()
-    while true do
-        pcall(function()
-            applyUIToState()
-            writeStateToUI()
-        end)
-        task.wait(0.5)
-    end
-end)
 
 backpack.ChildAdded:Connect(function(child)
     if UI.AutoPlantEnabled and not State.IsPlanting and child:IsA("Tool") and child:GetAttribute("Plant") then
@@ -451,12 +434,63 @@ end
 
 function stopEquipLoop()
     State.AutoEquipEnabled = false
-    if State.EquipLoopHandle then
-        task.cancel(State.EquipLoopHandle)
-    end
     State.EquipLoopHandle = nil
     updateStatusLabel(4, "Stopped", false)
 end
+
+
+local function applyUIToState()
+    if UI.AutoPlantEnabled ~= lastUI.AutoPlantEnabled then
+        State.AutoPlantEnabled = UI.AutoPlantEnabled
+        if State.AutoPlantEnabled then pcall(function() startPlantingProcess() end) else State.IsPlanting = false end
+        lastUI.AutoPlantEnabled = UI.AutoPlantEnabled
+    end
+
+    if UI.AutoBuySeedsEnabled ~= lastUI.AutoBuySeedsEnabled then
+        State.AutoBuySeedsEnabled = UI.AutoBuySeedsEnabled
+        if State.AutoBuySeedsEnabled then pcall(function() AutoBuySeeds() end) end
+        lastUI.AutoBuySeedsEnabled = UI.AutoBuySeedsEnabled
+    end
+
+    if UI.AutoBuyGearEnabled ~= lastUI.AutoBuyGearEnabled then
+        State.AutoBuyGearEnabled = UI.AutoBuyGearEnabled
+        if State.AutoBuyGearEnabled then pcall(function() AutoBuyGears() end) end
+        lastUI.AutoBuyGearEnabled = UI.AutoBuyGearEnabled
+    end
+
+    if UI.AutoEquipEnabled ~= lastUI.AutoEquipEnabled then
+        State.AutoEquipEnabled = UI.AutoEquipEnabled
+        if State.AutoEquipEnabled then pcall(function() startEquipLoop() end) else pcall(function() stopEquipLoop() end) end
+        lastUI.AutoEquipEnabled = UI.AutoEquipEnabled
+    end
+
+    if UI.EquipInterval ~= lastUI.EquipInterval then
+        local v = tonumber(UI.EquipInterval)
+        if v and v >= 1 then
+            State.EquipInterval = math.floor(v)
+            UI.EquipInterval = State.EquipInterval
+            lastUI.EquipInterval = State.EquipInterval
+        else
+            UI.EquipInterval = State.EquipInterval
+            lastUI.EquipInterval = State.EquipInterval
+        end
+    end
+
+    copyFiltersFromUI()
+end
+
+
+spawn(function()
+    while true do
+        pcall(function()
+            applyUIToState()
+            writeStateToUI()
+            saveConfig()
+        end)
+        task.wait(1)
+    end
+end)
+
 
 -- =========================
 -- UX / UI (derived from UXUI.txt, unchanged visuals & behavior)
@@ -509,7 +543,7 @@ local title = new("TextLabel", {
     Size = UDim2.new(1,-20,1,0),
     Position = UDim2.new(0,10,0,0),
     BackgroundTransparency = 1,
-    Text = "No Pro No Life",
+    Text = "No Hack No Life",
     Font = Enum.Font.GothamBold,
     TextSize = 22,
     TextColor3 = Color3.fromRGB(235,235,240),
@@ -607,6 +641,9 @@ local function makeToggle(parent, name, y, initialState, onChange)
     return { Container = container, Label = label, Status = status, Pill = pill }
 end
 
+-- โหลด config ตอนเริ่ม
+loadConfig()
+
 -- Create toggles and bind to getgenv().AutoUI (G)
 local t1 = makeToggle(leftCol, "AutoPlant", 0, G.AutoPlantEnabled, function(s) G.AutoPlantEnabled = s end)
 local t2 = makeToggle(leftCol, "AutoBuy Seeds", 72, G.AutoBuySeedsEnabled, function(s) G.AutoBuySeedsEnabled = s end)
@@ -615,6 +652,30 @@ local t4 = makeToggle(rightCol, "AutoEquip Best", 72, G.AutoEquipEnabled, functi
     G.AutoEquipEnabled = s
     if s then pcall(function() if EquipBestBridge then EquipBestBridge:Fire() end end) end
 end)
+
+
+local function refreshUIFromConfig()
+    -- Toggle states
+    t1.Pill.BackgroundColor3 = G.AutoPlantEnabled and ON_COLOR or OFF_COLOR
+    t1.Pill.Text = G.AutoPlantEnabled and "ON" or "OFF"
+    t1.Status.Text = "Status: " .. (G.AutoPlantEnabled and "Enabled" or "Disabled")
+
+    t2.Pill.BackgroundColor3 = G.AutoBuySeedsEnabled and ON_COLOR or OFF_COLOR
+    t2.Pill.Text = G.AutoBuySeedsEnabled and "ON" or "OFF"
+    t2.Status.Text = "Status: " .. (G.AutoBuySeedsEnabled and "Enabled" or "Disabled")
+
+    t3.Pill.BackgroundColor3 = G.AutoBuyGearEnabled and ON_COLOR or OFF_COLOR
+    t3.Pill.Text = G.AutoBuyGearEnabled and "ON" or "OFF"
+    t3.Status.Text = "Status: " .. (G.AutoBuyGearEnabled and "Enabled" or "Disabled")
+
+    t4.Pill.BackgroundColor3 = G.AutoEquipEnabled and ON_COLOR or OFF_COLOR
+    t4.Pill.Text = G.AutoEquipEnabled and "ON" or "OFF"
+    t4.Status.Text = "Status: " .. (G.AutoEquipEnabled and "Enabled" or "Disabled")
+end
+
+-- เรียกหลังสร้าง UI เสร็จ
+refreshUIFromConfig()
+
 
 -- Settings area
 local settingsFrame = new("Frame", { Parent = content, Size = UDim2.new(1,0,0,160), Position = UDim2.new(0,0,0,150), BackgroundColor3 = Color3.fromRGB(24,26,30) })
