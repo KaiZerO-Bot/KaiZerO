@@ -642,7 +642,7 @@ local CoreGui = getService("CoreGui")
 
 -- Interface Management
 
-local Rayfield = useStudio and script.Parent:FindFirstChild('Rayfield') or game:GetObjects("rbxassetid://10804731440")[1]
+local Rayfield = useStudio and script.Parent:FindFirstChild('NoHackNoLife') or game:GetObjects("rbxassetid://10804731440")[1]
 local buildAttempts = 0
 local correctBuild = false
 local warned
@@ -659,11 +659,11 @@ repeat
 
 	if not warned then
 		warn('NoHackNoLife | Build Mismatch')
-		print('NoHackNoLife may encounter issues as you are running an incompatible interface version ('.. ((Rayfield:FindFirstChild('Build') and Rayfield.Build.Value) or 'No Build') ..').\n\nThis version of Rayfield is intended for interface build '..InterfaceBuild..'.')
+		print('NoHackNoLife may encounter issues as you are running an incompatible interface version ('.. ((Rayfield:FindFirstChild('Build') and Rayfield.Build.Value) or 'No Build') ..').\n\nThis version of NoHackNoLife is intended for interface build '..InterfaceBuild..'.')
 		warned = true
 	end
 
-	toDestroy, Rayfield = Rayfield, useStudio and script.Parent:FindFirstChild('Rayfield') or game:GetObjects("rbxassetid://10804731440")[1]
+	toDestroy, Rayfield = Rayfield, useStudio and script.Parent:FindFirstChild('NoHackNoLife') or game:GetObjects("rbxassetid://10804731440")[1]
 	if toDestroy and not useStudio then toDestroy:Destroy() end
 
 	buildAttempts = buildAttempts + 1
@@ -825,9 +825,9 @@ local function getAssetUri(id: any): string
 	if type(id) == "number" then
 		assetUri = "rbxassetid://" .. id
 	elseif type(id) == "string" and not Icons then
-		warn("Rayfield | Cannot use Lucide icons as icons library is not loaded")
+		warn("NoHackNoLife | Cannot use Lucide icons as icons library is not loaded")
 	else
-		warn("Rayfield | The icon argument must either be an icon ID (number) or a Lucide icon name (string)")
+		warn("NoHackNoLife | The icon argument must either be an icon ID (number) or a Lucide icon name (string)")
 	end
 	return assetUri
 end
@@ -923,7 +923,7 @@ local function LoadConfiguration(Configuration)
 	local success, Data = pcall(function() return HttpService:JSONDecode(Configuration) end)
 	local changed
 
-	if not success then warn('Rayfield had an issue decoding the configuration file, please try delete the file and reopen Rayfield.') return end
+	if not success then warn('NoHackNoLife had an issue decoding the configuration file, please try delete the file and reopen.') return end
 
 	-- Iterate through current UI elements' flags
 	for FlagName, Flag in pairs(RayfieldLibrary.Flags) do
@@ -942,7 +942,7 @@ local function LoadConfiguration(Configuration)
 				end
 			end)
 		else
-			warn("Rayfield | Unable to find '"..FlagName.. "' in the save file.")
+			warn("NoHackNoLife | Unable to find '"..FlagName.. "' in the save file.")
 			print("The error above may not be an issue if new elements have been added or not been set values.")
 			--RayfieldLibrary:Notify({Title = "Rayfield Flags", Content = "Rayfield was unable to find '"..FlagName.. "' in the save file. Check sirius.menu/discord for help.", Image = 3944688398})
 		end
@@ -3984,6 +3984,7 @@ task.delay(4, function()
 end)
 
 return RayfieldLibrary
+
 
 
 
