@@ -1,13 +1,3 @@
---[[ 
-Hendar Hub - Combined Auto Controller (Single File)
-- Integrates: AutoPlant, AutoBuySeeds, AutoBuyGear, AutoEquipBest
-- Replaces custom UI with Rayfield UI (flags + persistent config)
-- Rarity filters + Equip interval configurable via Rayfield
-- No external dependencies beyond Rayfield loader (as supplied)
-
-Author: Game + Copilot
-]]
-
 -- ============================
 -- SERVICES
 -- ============================
@@ -529,3 +519,4 @@ MainTab:CreateButton({
 
 -- Final log
 safeLog("CombinedAuto", "No Hack No Life loaded.")
+
