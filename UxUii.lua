@@ -1,17 +1,5 @@
---[[
-
-	Rayfield Interface Suite
-	by Sirius
-
-	shlex  | Designing + Programming
-	iRay   | Programming
-	Max    | Programming
-	Damian | Programming
-
-]]
-
 if debugX then
-	warn('Initialising Rayfield')
+	warn('Initialising No Hack No Life')
 end
 
 local function getService(name)
@@ -78,7 +66,7 @@ local ConfigurationExtension = ".rfld"
 local settingsTable = {
 	General = {
 		-- if needs be in order just make getSetting(name)
-		rayfieldOpen = {Type = 'bind', Value = 'K', Name = 'Rayfield Keybind'},
+		rayfieldOpen = {Type = 'bind', Value = 'K', Name = 'Keybind'},
 		-- buildwarnings
 		-- rayfieldprompts
 
@@ -3996,3 +3984,4 @@ task.delay(4, function()
 end)
 
 return RayfieldLibrary
+
