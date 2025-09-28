@@ -3729,15 +3729,15 @@ function RayfieldLibrary:LoadConfiguration()
 				end
 			else
 				notified = true
-				RayfieldLibrary:Notify({Title = "Rayfield Configurations", Content = "We couldn't enable Configuration Saving as you are not using software with filesystem support.", Image = 4384402990})
+				RayfieldLibrary:Notify({Title = "Configurations", Content = "We couldn't enable Configuration Saving as you are not using software with filesystem support.", Image = 4384402990})
 			end
 		end)
 
 		if success and loaded and not notified then
-			RayfieldLibrary:Notify({Title = "Rayfield Configurations", Content = "The configuration file for this script has been loaded from a previous session.", Image = 4384403532})
+			RayfieldLibrary:Notify({Title = "Configurations", Content = "The configuration file for this script has been loaded from a previous session.", Image = 4384403532})
 		elseif not success and not notified then
-			warn('Rayfield Configurations Error | '..tostring(result))
-			RayfieldLibrary:Notify({Title = "Rayfield Configurations", Content = "We've encountered an issue loading your configuration correctly.\n\nCheck the Developer Console for more information.", Image = 4384402990})
+			warn('Configurations Error | '..tostring(result))
+			RayfieldLibrary:Notify({Title = "Configurations", Content = "We've encountered an issue loading your configuration correctly.\n\nCheck the Developer Console for more information.", Image = 4384402990})
 		end
 	end
 
@@ -3984,4 +3984,5 @@ task.delay(4, function()
 end)
 
 return RayfieldLibrary
+
 
